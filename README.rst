@@ -49,6 +49,7 @@ Also showing how to parse form data.
         return 'You sent: key={}, value={}'.format(kwargs['key'], kwargs['value']), 200
 
     # you can also send params in the url
+    # example http://server.com?key=value&key2=value2
     @server.route('/query_parameters')
     def QueryParams(*args, **kwargs):
         return 'You sent params={}'.format(kwargs['params'])
