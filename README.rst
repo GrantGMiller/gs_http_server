@@ -25,8 +25,8 @@ Also showing how to parse form data.
     @server.route('/')
     def Index():
         return 'Hello. The current time is {}'.format(time.asctime()), 200
-        # notice you must return the HTTP STATUS CODE (see https://developer.mozilla.org/en-US/docs/Web/HTTP/Status)
-
+        # notice you can return the HTTP STATUS CODE (see https://developer.mozilla.org/en-US/docs/Web/HTTP/Status)
+        # you can also just return the string (withouth the status code) like ' return "OK" '
 
     @server.route('/form', methods=['GET', 'POST'])
     def Post(*args, **kwargs):
@@ -48,6 +48,11 @@ Also showing how to parse form data.
         print(args, kwargs)
         return 'You sent: key={}, value={}'.format(kwargs['key'], kwargs['value']), 200
 
+    # you can also send params in the url
+    @server.route('/query_parameters')
+    def QueryParams(*args, **kwargs):
+        return 'You sent params={}'.format(kwargs['params'])
+
     print('Server Listening at http://{}:{}'.format(server.IPAddress, server.IPPort))
     # >>> Server Listening at http://10.20.30.40:5505
 
@@ -65,11 +70,16 @@ Testing using the python-requests package (https://pypi.org/project/requests/) o
     # >>> Hello. The current time is Mon Nov 29 09:51:09 2021
 
     # send a post request
-
     resp = requests.post(host + 'form', json={'key1': 'value1', 'key2': 'value2'})
     print('resp.text=', resp.text)
     # >>> You posted "{'key1': 'value1', 'key2': 'value2'}"
 
+    # send values in the url itself
     resp = requests.get(host + 'endpoint/start/room101')
     print('resp.text=', resp.text)
     # >>> You sent: key=start, value=room101
+
+    # send values in the url parameters
+    resp = requests.get(host + 'query_parameters', params={'paramKey1': 'paramValue2', 'paramKey2': 'paramValue2')
+    print('resp.text=', resp.text)
+    # >>> You sent params={'paramKey1': 'paramValue1', 'paramKey2': 'paramValue2'}

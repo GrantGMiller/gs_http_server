@@ -30,4 +30,9 @@ def Endpoint(*args, **kwargs):
     return 'You sent: key={}, value={}'.format(kwargs['key'], kwargs['value']), 200
 
 
+@server.route('/query_parameters')
+def QueryParams(*args, **kwargs):
+    return 'You sent params={}'.format(kwargs['params'])
+
+
 print('Server Listening at http://{}:{}'.format(server.IPAddress, server.IPPort))

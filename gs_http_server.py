@@ -28,7 +28,11 @@ class HTTP_Server:
             raise ResourceWarning('Port unavailable')  # this is not likely to recover
         self._InitServerEvents()
         try:
-            self.print('{} server running at http://{}:{}'.format(type(self).__name__, self.serv.ListenIPAddress, self.serv.IPPort))
+            self.print('{} server running at http://{}:{}'.format(
+                type(self).__name__,
+                self.IPAddress,
+                self.IPPort
+            ))
         except:
             pass
 
@@ -43,7 +47,7 @@ class HTTP_Server:
 
     @staticmethod
     def build_route_pattern(route):
-        route_regex = re.sub(r'(<\w+>)', r'(?P\1.+)', route)
+        route_regex = re.sub(r'(<\w+>)', r'(?P\1[^\?]+)', route)
         return re.compile("^{}$".format(route_regex))
 
     def route(self, *args, **kwargs):
@@ -59,10 +63,21 @@ class HTTP_Server:
         return decorator
 
     def get_route_match(self, path):
+        splits = path.split('?')
+        path = splits[0]
+        if len(splits) > 1:  # there are params like '?key=value&key2=value2
+            params = {}
+            for pair in splits[1].split('&'):
+                k, v = pair.split('=')
+                params[k] = v
+
         for route_pattern, methods, view_function in self.routes:
             m = route_pattern.match(path)
             if m:
-                return m.groupdict(), methods, view_function
+                data = m.groupdict()
+                if params:
+                    data['params'] = params
+                return data, methods, view_function
 
         return None
 
@@ -78,7 +93,10 @@ class HTTP_Server:
             kwargs, methods, view_function = route_match
             # unquote any arguments
             for key, val in kwargs.items():
-                kwargs[key] = unquote(val)
+                try:
+                    kwargs[key] = unquote(val)
+                except:
+                    pass
 
             self.print(73, kwargs, methods, view_function)
             if method in methods:
@@ -90,25 +108,28 @@ class HTTP_Server:
                 try:
                     kwargs['method'] = method
                     return self._FixViewFuncReturnType(view_function(**kwargs))
-                except TypeError:
+                except TypeError as e108:
+                    self.print('Exception 108:', e108)
                     try:
                         kwargs.pop('data')
                         return self._FixViewFuncReturnType(view_function(**kwargs))
-                    except TypeError:
+                    except TypeError as e113:
+                        self.print('Exception 113:', e113)
                         try:
                             kwargs.pop('method')
                             return self._FixViewFuncReturnType(view_function(**kwargs))
                         except TypeError as e93:
+                            self.print('Exception 93:', e93)
                             return 'Error 91: {}'.format(e93), 404
         else:
             return 'Error 93: Route "{}"" has not been registered'.format(path), 404
             # raise ValueError('Route "{}"" has not been registered'.format(path))
 
     def _FixViewFuncReturnType(self, ret):
-        # the veiw function should return a tuple
+        # the view function should return a tuple
         # if it returned a non-tuple, assume the user is implying a successfull response ('ok', 200)
         if not isinstance(ret, tuple):
-            return (ret, 200)
+            return ret, 200
         else:
             return ret
 
@@ -206,7 +227,7 @@ class HTTP_Server:
             client.Send(response_body_raw.encode())
 
         except Exception as e2:
-            print('Error 188:', e2)
+            self.print('Exception 188:', e2)
 
     def _InitServerEvents(self):
         @event(self.serv, 'ReceiveData')
@@ -225,7 +246,7 @@ class HTTP_Server:
                 # ValueError: list.remove(x): x not in list
                 # '''
             except Exception as e:
-                print('REST Server Exception 207:', e)
+                print('{} Exception 207:'.format(type(self).__name__), e)
 
         @event(self.serv, ['Connected', 'Disconnected'])
         def HandleClientConnect(client, state):
