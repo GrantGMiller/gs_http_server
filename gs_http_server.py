@@ -65,8 +65,8 @@ class HTTP_Server:
     def get_route_match(self, path):
         splits = path.split('?')
         path = splits[0]
+        params = {}
         if len(splits) > 1:  # there are params like '?key=value&key2=value2
-            params = {}
             for pair in splits[1].split('&'):
                 k, v = pair.split('=')
                 params[k] = v
