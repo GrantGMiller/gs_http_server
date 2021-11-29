@@ -27,7 +27,10 @@ class HTTP_Server:
             print('self.serv.StartListen() res=', res)
             raise ResourceWarning('Port unavailable')  # this is not likely to recover
         self._InitServerEvents()
-        print('ExtronREST server running at http://{}:{}'.format(self.serv.ListenIPAddress, self.serv.IPPort))
+        try:
+            self.print('{} server running at http://{}:{}'.format(type(self).__name__, self.serv.ListenIPAddress, self.serv.IPPort))
+        except:
+            pass
 
     @property
     def IPAddress(self):
