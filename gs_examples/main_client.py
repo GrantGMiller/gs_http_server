@@ -1,12 +1,11 @@
-import json
 import time
-from urllib.request import urlopen
+import gs_requests as requests
 
-# Example of Set
+# Example of HTTP POST
 data = {'currentTime': time.asctime()}
-resp = urlopen('http://10.8.254.78:5505/post', data=json.dumps(data).encode())
-print('resp=', resp.read().decode())
+resp = requests.post('http://192.168.68.105:5505/form', json=data)
+print('resp.text=', resp.text)
 
-# Example of Get
-resp = urlopen('http://10.8.254.78:5505/')
-print('resp=', resp.read().decode())
+# Example of HTTP GET
+resp = requests.get('http://192.168.68.105:5505/')
+print('resp.text=', resp.text)

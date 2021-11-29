@@ -1,5 +1,4 @@
 import time
-
 from gs_http_server import HTTP_Server
 from extronlib.device import ProcessorDevice
 
