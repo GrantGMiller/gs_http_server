@@ -28,7 +28,6 @@ Also showing how to parse form data.
         # notice you must return the HTTP STATUS CODE (see https://developer.mozilla.org/en-US/docs/Web/HTTP/Status)
 
 
-
     @server.route('/form', methods=['GET', 'POST'])
     def Post(*args, **kwargs):
         print('args={}, kwargs={}'.format(args, kwargs))
@@ -42,6 +41,12 @@ Also showing how to parse form data.
         elif method == GET
             return 'You can send JSON data in the HTTP Body. Try it using https://www.postman.com or a similar tool.', 200
 
+
+    # you can also capture values in the url
+    @server.route('/endpoint/<key>/<value>')
+    def Endpoint(*args, **kwargs):
+        print(args, kwargs)
+        return 'You sent: key={}, value={}'.format(kwargs['key'], kwargs['value']), 200
 
     print('Server Listening at http://{}:{}'.format(server.IPAddress, server.IPPort))
     # >>> Server Listening at http://10.20.30.40:5505
@@ -64,3 +69,7 @@ Testing using the python-requests package (https://pypi.org/project/requests/) o
     resp = requests.post(host + 'form', json={'key1': 'value1', 'key2': 'value2'})
     print('resp.text=', resp.text)
     # >>> You posted "{'key1': 'value1', 'key2': 'value2'}"
+
+    resp = requests.get(host + 'endpoint/start/room101')
+    print('resp.text=', resp.text)
+    # >>> You sent: key=start, value=room101

@@ -24,4 +24,10 @@ def Post(*args, **kwargs):
         return 'You can send JSON data in the HTTP Body. Try it using https://www.postman.com or a similar tool.', 200
 
 
+@server.route('/endpoint/<key>/<value>')
+def Endpoint(*args, **kwargs):
+    print(args, kwargs)
+    return 'You sent: key={}, value={}'.format(kwargs['key'], kwargs['value']), 200
+
+
 print('Server Listening at http://{}:{}'.format(server.IPAddress, server.IPPort))
