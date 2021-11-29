@@ -1,10 +1,10 @@
 import time
 
-from gs_http_server import Rest_Server
+from gs_http_server import HTTP_Server
 from extronlib.device import ProcessorDevice
 
 proc = ProcessorDevice('ProcessorAlias')
-server = Rest_Server(proc=proc)
+server = HTTP_Server(proc=proc)
 
 
 @server.route('/')

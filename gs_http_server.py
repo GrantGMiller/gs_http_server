@@ -12,7 +12,7 @@ except Exception as e:
     from extronlib.interface import EthernetServerInterfaceEx
 
 
-class Rest_Server:
+class HTTP_Server:
 
     def __init__(self, proc=None, port=5505, debug=False):
         self.proc = proc
@@ -230,7 +230,7 @@ class Rest_Server:
 
 
 if __name__ == '__main__':
-    app = Rest_Server()
+    app = HTTP_Server()
 
 
     @app.route('/test', methods=['GET', 'POST'])
