@@ -143,7 +143,16 @@ This is the 'template.html' for the example above.
     </body>
     </html>
 
-Testing using the python-requests package (https://pypi.org/project/requests/) or GS_Requests (https://github.com/GrantGMiller/gs_requests)
+Testing
+=======
+
+Recommended testing tools:
+
+python-requests (windows/linux): https://pypi.org/project/requests/
+
+GS_Requests (Extron Controllers): https://github.com/GrantGMiller/gs_requests
+
+Postman (windows/linux): https://www.postman.com/
 
 ::
 
