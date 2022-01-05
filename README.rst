@@ -2,11 +2,12 @@ GS HTTP Server
 ==============
 
 A simple HTTP server that can be hosted by an Extron Pro Extron Processor.
+Inspired by https://flask.palletsprojects.com/en/2.0.x/
 
 Note: Extron's ControlScript added the SSLWrap() method which allows the processor to create a SSL server, but no effort has been made at this time to update this module to support HTTPS. (If you have any ideas on how to do that, feel free to send a Pull Request).
 
-Simple Example Server
-=====================
+Simple JSON API Server
+======================
 
 A basic HTTP server that accepts GET and POST request.
 Also showing how to parse form data.
@@ -14,48 +15,133 @@ Also showing how to parse form data.
 ::
 
     import time
-    from gs_http_server import HTTP_Server
+    from gs_http_server import HTTP_Server, jsonify
     from extronlib.device import ProcessorDevice
 
     proc = ProcessorDevice('ProcessorAlias')
-    server = HTTP_Server(proc=proc) # passing the processor is needed so the HTTP_Server knows the host IP
+    server = HTTP_Server(proc=proc)  # passing the processor is needed so the HTTP_Server knows the host IP
 
 
     # A simple HTTP GET that returns the current time.
     @server.route('/')
     def Index():
-        return 'Hello. The current time is {}'.format(time.asctime()), 200
-        # notice you can return the HTTP STATUS CODE (see https://developer.mozilla.org/en-US/docs/Web/HTTP/Status)
-        # you can also just return the string (withouth the status code) like ' return "OK" '
+        return jsonify('Hello. The current time is {}'.format(time.asctime()))
+
 
     @server.route('/form', methods=['GET', 'POST'])
-    def Post(*args, **kwargs):
-        print('args={}, kwargs={}'.format(args, kwargs))
-        method = kwargs.get('method')
+    def Post(request):
+        print('Post(request=', request)
 
-        if method == 'POST':
-            data = kwargs.get('data', {})
-            print('type(data)=', type(data))
-            return 'You posted "{}"'.format(data), 200
+        if request.method == 'POST':
+            return jsonify('You posted "{}"'.format(request.json))
 
-        elif method == GET
-            return 'You can send JSON data in the HTTP Body. Try it using https://www.postman.com or a similar tool.', 200
+        elif request.method == 'GET':
+            return jsonify('You can send JSON data in the HTTP Body. Try it using https://www.postman.com or a similar tool.')
 
 
     # you can also capture values in the url
     @server.route('/endpoint/<key>/<value>')
-    def Endpoint(*args, **kwargs):
-        print(args, kwargs)
-        return 'You sent: key={}, value={}'.format(kwargs['key'], kwargs['value']), 200
+    def Endpoint(request, key, value):
+        print('Endpoint(request=', request)
+        return jsonify('You sent: key={}, value={}'.format(key, value))
+
 
     # you can also send params in the url
     # example http://server.com?key=value&key2=value2
     @server.route('/query_parameters')
-    def QueryParams(*args, **kwargs):
-        return 'You sent params={}'.format(kwargs['params'])
+    def QueryParams(request):
+        print('QueryParams(request=', request)
+        return jsonify('You sent params={}'.format(request.args))
+
 
     print('Server Listening at http://{}:{}'.format(server.IPAddress, server.IPPort))
     # >>> Server Listening at http://10.20.30.40:5505
+
+Templating Engine
+=================
+A simple templating engine to render web pages.
+Inspired by https://jinja.palletsprojects.com/en/3.0.x/
+
+::
+
+    import datetime
+    import random
+    from gs_http_server import HTTP_Server, render_template
+
+    app = HTTP_Server(
+        # debug=True
+    )
+
+
+    # All template files should be in a directory called 'templates'
+    @app.route('/')
+    def Index():
+        return render_template(
+            'index.html'  # this file name is relative to the '/templates' directory
+        )
+
+
+    @app.route("/form", methods=["GET", "POST"])
+    def Test(request):
+        print('Test(request=', request)
+
+        if request.method == 'POST' and request.form['username']:
+            # the user submitted the form and entered their username, welcome them
+            msg = 'Welcome {}'.format(request.form['username'])
+        else:
+            msg = ''
+
+        return render_template(
+            'form.html',
+            message=msg
+        )
+
+
+    class Person:
+        def __init__(self, name, age):
+            self.name = name
+            self.age = age
+
+
+    @app.route('/template')
+    def Template(request):
+        person = Person(
+            name=random.choice(['Grant', 'Joel', 'Matt', 'Anthony']),
+            age=random.randint(21, 99)
+        )
+        return render_template(
+            'template.html',
+            name=person.name,
+            currentTime=datetime.datetime.now(),
+            person=person, # the templating-engine can render object attributes or method calls, only available on Q/XI processors
+        )
+
+
+    print('open a web browser to this machine\'s IP on port', app.IPPort, )
+
+
+Template Format
+===============
+The template file should be stored in a directory called 'templates'.
+This is the 'template.html' for the example above.
+
+::
+
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>Title</title>
+    </head>
+    <body>
+        Hello {{ name }},<br>
+        The time is {{ currentTime }}.
+        <br>
+        name={{person.name}}
+        <br>
+        age={{person.age}}
+    </body>
+    </html>
 
 Testing using the python-requests package (https://pypi.org/project/requests/) or GS_Requests (https://github.com/GrantGMiller/gs_requests)
 

@@ -1,15 +1,12 @@
-import json
 import re
-from urllib.parse import unquote
+import json
+from collections import defaultdict
 
 import time
-
-try:
-    from extronlib_pro import event, EthernetServerInterfaceEx
-except Exception as e:
-    # use normal extronlib
-    from extronlib import event
-    from extronlib.interface import EthernetServerInterfaceEx
+from extronlib import event
+from urllib.parse import unquote
+from extronlib.system import File
+from extronlib.interface import EthernetServerInterfaceEx
 
 
 class HTTP_Server:
@@ -54,6 +51,7 @@ class HTTP_Server:
         def decorator(f):
             route_pattern = self.BuildRoutePatterns(args[0])
             if "methods" in kwargs:
+                kwargs['methods'] = [m.upper() for m in kwargs['methods']]  # ensure upper case
                 self.routes.append((route_pattern, kwargs["methods"], f))
             else:
                 self.routes.append((route_pattern, self.defaultMethods, f))
@@ -74,7 +72,8 @@ class HTTP_Server:
         for route_pattern, methods, view_function in self.routes:
             m = route_pattern.match(path)
             if m:
-                data = m.groupdict()
+                data = defaultdict(lambda: None)
+                data.update(m.groupdict())
                 if params:
                     data["params"] = params
                 return data, methods, view_function
@@ -85,47 +84,44 @@ class HTTP_Server:
         if self.debug:
             print(*a, **k)
 
-    def Serve(self, path, method=None, data=None):
-        self.print(70, path, method, data)
-        route_match = self.GetRouteMatch(path)
+    def Serve(self, request):
+        self.print('87 req=', request)
+        route_match = self.GetRouteMatch(request.path)
         self.print(71, route_match)
         if route_match:
             kwargs, methods, view_function = route_match
             # unquote any arguments
             for key, val in kwargs.items():
-                try:
-                    kwargs[key] = unquote(val)
-                except BaseException:
-                    pass
+                if val:
+                    try:
+                        kwargs[key] = unquote(val)
+                    except BaseException:
+                        pass
 
             self.print(73, kwargs, methods, view_function)
-            if method in methods:
-                if data is not None:
-                    kwargs["data"] = data
-                else:
-                    kwargs["data"] = ""
-
+            if request.method in methods:
                 try:
-                    kwargs["method"] = method
-                    return self._FixViewFuncReturnType(view_function(**kwargs))
+                    return self._FixViewFuncReturnType(
+                        view_function(request, **kwargs),
+                    )
                 except TypeError as e108:
                     self.print("Exception 108:", e108)
                     try:
-                        kwargs.pop("data")
                         return self._FixViewFuncReturnType(
-                            view_function(**kwargs))
+                            view_function(request),
+                        )
                     except TypeError as e113:
                         self.print("Exception 113:", e113)
                         try:
-                            kwargs.pop("method")
                             return self._FixViewFuncReturnType(
-                                view_function(**kwargs))
+                                view_function(),
+                            )
                         except TypeError as e93:
                             self.print("Exception 93:", e93)
                             return "Error 91: {}".format(e93), 404
         else:
             return 'Error 93: Route "{}"" has not been registered'.format(
-                path), 404
+                request.path), 404
             # raise ValueError('Route "{}"" has not been registered'.format(path))
 
     def _FixViewFuncReturnType(self, ret):
@@ -138,13 +134,6 @@ class HTTP_Server:
             return ret
 
     @staticmethod
-    def NormalizeLineEndings(s):
-        """Convert string containing various line endings like \n, \r or \r\n,
-        to uniform \n."""
-
-        return "".join((line + "\n") for line in s.splitlines())
-
-    @staticmethod
     def StatusCode(status):
         codes = {
             200: "Ok\n",
@@ -154,63 +143,39 @@ class HTTP_Server:
         }
         return codes[status]
 
-    # This receives and pushes the request to the appropriate method
+    # This receives the raw HTTP request
     def DataProcess(self, client, data):
-
-        # headers and body are divided with \n\n (or \r\n\r\n - that's why we
-        # normalize endings). In real application usage, you should handle
-        # all variations of line endings not to break request body
-        request = self.NormalizeLineEndings(data)  # hack again
-        requestSections = request.split("\n\n", 1)
-        if len(requestSections) == 1:
-            request_head, request_body = requestSections[0], ""
-        else:
-            request_head, request_body = requestSections
-
-        # first line is request headline, and others are headers
-        # Can process through headers if needed for future expansion
-        # Such as looking for Content-Type
-        request_head = request_head.splitlines()
-        request_headline = request_head[0]
-        # headers have their name up to first ': '. In real world uses, they
-        # could duplicate, and dict drops duplicates by default, so
-        # be aware of this.
-
-        # request_headers = dict(x.split(': ', 1) for x in request_head[1:])
-
-        # headline has form of "POST /can/i/haz/requests HTTP/1.0"
-        request_method, request_uri, request_proto = request_headline.split(
-            " ", 3)
-
-        # print('Request Body', json.loads(request_body))
-
-        # Checks if there's body data
+        self.print('156', client, data)
+        request = Request(raw=data)
+        self.print('157 req=', request)
         try:
-            request_body = json.loads(request_body)
-        except ValueError:
-            pass
-
-        try:
-            response, code = self.Serve(
-                request_uri, request_method, request_body)
+            response, status_code = self.Serve(request)
         except TypeError as e:
-            response, code = json.dumps({"Error": "Bad Request", 'Exception': str(e)}), 404
-        self.DataReturn(client, {"Data": response, "StatusCode": code})
-        # Temporary for testing return Trivial Data
-        # self.DataReturn(client, data)
+            response, status_code = json.dumps({"Error": "Internal Server Error", 'Exception': str(e)}), 500
 
-    # This is last in the sequence which  returns the HTTP request
-    def DataReturn(self, client, data):
+        self.DataReturn(client, response, status_code)
 
-        response_body_raw = data["Data"]
+    def DataReturn(self, client, response, status_code):
+        # This is last in the sequence. It actually sends the raw response back to the client.
 
-        # Clearly state that connection will be closed after this response,
-        # and specify length of response body
-        response_headers = {
-            "Content-Type": "application/json;encoding=utf8",
-            "Content-Length": len(response_body_raw),
-            "Connection": "close",
-        }
+        if isinstance(response, str):
+            response_body_raw = response
+
+            # Clearly state that connection will be closed after this response,
+            # and specify length of response body
+            response_headers = {
+                "Content-Type": "application/json;encoding=utf8",
+                "Content-Length": len(response_body_raw),
+                "Connection": "close",
+            }
+
+        elif isinstance(response, Response):
+            response_headers = response.headers.copy()
+            response_headers.update({
+                "Content-Length": len(response.body),
+                "Connection": "close",
+            })
+            response_body_raw = response.body
 
         response_headers_raw = "".join(
             "{}: {}\n".format(k, v) for k, v in response_headers.items()
@@ -218,8 +183,8 @@ class HTTP_Server:
 
         # Reply as HTTP/1.1 server, saying "HTTP OK" (code 200).
         response_proto = "HTTP/1.1"
-        response_status = data["StatusCode"]
-        response_status_text = self.StatusCode(data["StatusCode"])
+        response_status = status_code
+        response_status_text = self.StatusCode(status_code)
 
         # sending all this stuff
         try:
@@ -264,12 +229,196 @@ class HTTP_Server:
             self.print("Client {} ({}).".format(state, client.IPAddress))
 
 
+def NormalizeLineEndings(s):
+    """Convert string containing various line endings like \n, \r or \r\n,
+    to uniform \n."""
+    return '\n'.join(s.splitlines())
+
+
+import collections
+
+
+class CaseInsensitiveDict(dict):
+
+    def __getitem__(self, k):
+        k = k.lower()
+        if k not in self:
+            return None
+        return super().__getitem__(k)
+
+    def __setitem__(self, k, v):
+        k = k.lower()
+        return super().__setitem__(k, v)
+
+    def get(self, k, *args, **kwargs):
+        return super().get(k.lower(), *args, **kwargs)
+
+
+class Request:
+    # should follow https://flask.palletsprojects.com/en/1.1.x/api/#incoming-request-data
+    def __init__(self, raw, **kwargs):
+        self.raw = NormalizeLineEndings(raw)
+        self.kwargs = kwargs
+
+        # parse
+        requestSections = self.raw.split("\n\n", 1)
+        if len(requestSections) == 1:
+            self.rawHeaders, self.data = requestSections[0], ''
+        else:
+            self.rawHeaders, self.data = requestSections
+
+        self.content_length = len(self.data)
+
+        headerSplit = self.rawHeaders.splitlines()
+
+        self.method, self.path, self.protocol = headerSplit[0].split(' ', 3)
+        self.method = self.method.upper()
+
+        self.args = CaseInsensitiveDict()
+        if '?' in self.path:
+            s = self.path.split('?', 2)[-1]
+            for pair in s.split('&'):
+                k, v = pair.split('=', 2)
+                self.args[k] = v
+
+        try:
+            self.json = json.loads(self.data)
+            self.is_json = True
+        except:
+            self.json = None
+            self.is_json = False
+
+        self.raw_request_line = headerSplit[0]
+
+        self.headers = CaseInsensitiveDict()
+        for line in headerSplit[1:]:
+            key, value = line.split(': ', 2)
+            if key not in self.headers:
+                self.headers[key] = value
+            else:  # duplicate keys
+                self.headers[key] += ';{}'.format(value)
+
+        self.form = CaseInsensitiveDict()
+        if 'x-www-form-urlencoded' in self.headers.get('Content-type', ''):
+            for item in self.data.split('&', 2):
+                k, v = item.split('=', 2)
+                if k not in self.form:
+                    self.form[k] = v
+                else:
+                    self.form[k] += ';{}'.format(v)
+
+    def __str__(self):
+        return '<Request: method={}, path={}, form={}, args={}>'.format(
+            self.method,
+            self.path,
+            self.form,
+            self.args,
+        )
+
+    def get_json(self):
+        return self.json
+
+
+class Response:
+    # should follow https://flask.palletsprojects.com/en/1.1.x/api/#response-objects
+    def __init__(self, body):
+        self.body = body
+        self.headers = CaseInsensitiveDict()
+        self.status_code = 200
+
+        # init
+        self.headers['Content-Type'] = 'text/html'
+
+
+def make_response(body):
+    return Response(body=body)
+
+
+patternTemplateVar = re.compile('\{\{(.+)\}\}')
+
+
+def render_template(template_name, *args, **kwargs):
+    with File('/templates/{}'.format(template_name), mode='rt') as file:
+        ret = file.read()
+        for match in patternTemplateVar.finditer(ret):
+            key = match.group(1).strip()
+            value = kwargs.get(key, '')
+            if evalAvailable:
+                try:
+                    value = eval(key, kwargs)
+                except Exception as e:
+                    pass
+                ret = ret.replace(match.group(0), str(value))
+
+            else:
+                ret = ret.replace(match.group(0), str(value))
+
+    resp = make_response(ret)
+    resp.headers['Content-Type'] = 'text/html'
+    return resp
+
+
+def jsonify(obj):
+    resp = make_response(json.dumps(obj))
+    resp.headers['content-type'] = 'application/json'
+    return resp
+
+
+try:
+    # eval only works on XI processors
+    eval('print("eval is available for templates")')
+    evalAvailable = True
+except Exception as e:
+    print('eval() is not available', e)
+    evalAvailable = False
+
 if __name__ == "__main__":
-    app = HTTP_Server()
+    import datetime
+    import random
 
-    @app.route("/test", methods=["GET", "POST"])
-    def Test(*a, **k):
-        print("Test(data=", a, k)
-        return json.dumps(time.asctime()), 200
+    app = HTTP_Server(
+        # debug=True
+    )
 
-    print("end test")
+
+    @app.route('/')
+    def Index(request):
+        return render_template('index.html')
+
+
+    @app.route("/form", methods=["GET", "POST"])
+    def Test(request):
+        print('Test(request=', request)
+
+        if request.form['username']:
+            msg = 'Welcome {}'.format(request.form['username'])
+        else:
+            msg = ''
+
+        return render_template(
+            'form.html',
+            message=msg
+        )
+
+
+    class Person:
+        def __init__(self, name, age):
+            self.name = name
+            self.age = age
+
+
+    @app.route('/template')
+    def Template(request):
+        person = Person(
+            name=random.choice(['Grant', 'Joel', 'Matt', 'Anthony']),
+            age=random.randint(21, 99)
+        )
+        return render_template(
+            'template.html',
+            name=person.name,
+            currentTime=datetime.datetime.now(),
+            person=person,
+        )
+
+
+    print('open a web browser to this machine\'s IP on port', app.IPPort, )
