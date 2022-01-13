@@ -4,7 +4,7 @@ GS HTTP Server
 A simple HTTP server that can be hosted by an Extron Pro Extron Processor.
 Inspired by https://flask.palletsprojects.com/en/2.0.x/
 
-Note: Extron's ControlScript added the SSLWrap() method which allows the processor to create a SSL server, but no effort has been made at this time to update this module to support HTTPS. (If you have any ideas on how to do that, feel free to send a Pull Request).
+Note: Extron's ControlScript added the SSLWrap() method which allows the processor to create a SSL server, but no effort has been made at this time to Update this module to support HTTPS. (If you have any ideas on how to do that, feel free to send a Pull Request).
 
 Simple JSON API Server
 ======================
@@ -19,35 +19,45 @@ Also showing how to parse form data.
     from extronlib.device import ProcessorDevice
 
     proc = ProcessorDevice('ProcessorAlias')
-    server = HTTP_Server(proc=proc)  # passing the processor is needed so the HTTP_Server knows the host IP
+    server = HTTP_Server(
+        proc=proc,
+        debug=True,
+    )  # passing the 'proc' is optional, but will allow you to reference the host IP Address using 'server.IPAddress'
 
 
     # A simple HTTP GET that returns the current time.
     @server.route('/')
     def Index():
         return jsonify('Hello. The current time is {}'.format(time.asctime()))
+        # jsonify formats the HTTP response data as a json object
+        #   it also adds the 'Content-Type': 'application/json' header to the HTTP response
 
 
     @server.route('/form', methods=['GET', 'POST'])
     def Post(request):
+        # the 'request' argument contains info about the HTTP Request that was received
+        # Your View Function (in this case 'Post()') can accept a parameter called 'request' or not +
+        # For example see 'Index()' above, notice it does not accept any parameters
         print('Post(request=', request)
 
         if request.method == 'POST':
             return jsonify('You posted "{}"'.format(request.json))
 
         elif request.method == 'GET':
-            return jsonify('You can send JSON data in the HTTP Body. Try it using https://www.postman.com or a similar tool.')
+            return jsonify(
+                'You can send JSON data in the HTTP Body. Try it using https://www.postman.com or a similar tool.'
+            )
 
 
     # you can also capture values in the url
     @server.route('/endpoint/<key>/<value>')
-    def Endpoint(request, key, value):
-        print('Endpoint(request=', request)
+    def Endpoint(key, value):
+        print('Endpoint(key=', key, ', value=', value)
         return jsonify('You sent: key={}, value={}'.format(key, value))
 
 
     # you can also send params in the url
-    # example http://server.com?key=value&key2=value2
+    # example http://server.com?name=Bob&age=99
     @server.route('/query_parameters')
     def QueryParams(request):
         print('QueryParams(request=', request)

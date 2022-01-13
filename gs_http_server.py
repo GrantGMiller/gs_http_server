@@ -25,18 +25,26 @@ class HTTP_Server:
             raise ResourceWarning("Port unavailable")
         self._InitServerEvents()
         try:
-            self.print(
-                "{} server running at http://{}:{}".format(
-                    type(self).__name__, self.IPAddress, self.IPPort
-                )
-            )
-        except BaseException:
+            self.print(type(self), 'running at', self.url)
+        except:
             pass
+
+    @property
+    def url(self):
+        return 'http://{}:{}/'.format(self.IPAddress, self.IPPort)
 
     @property
     def IPAddress(self):
         if self.proc is not None:
             return self.proc.IPAddress
+        else:
+            try:
+                import socket  # only works on Q/XI processors
+                return socket.gethostbyname(
+                    socket.gethostname(),
+                )
+            except:
+                return 'localhost'
 
     @property
     def IPPort(self):
@@ -45,7 +53,7 @@ class HTTP_Server:
     @staticmethod
     def BuildRoutePatterns(route):
         route_regex = re.sub(r"(<\w+>)", r"(?P\1[^\?]+)", route)
-        return re.compile("^{}$".format(route_regex))
+        return re.compile("^{}$".format(route_regex), re.IGNORECASE)
 
     def route(self, *args, **kwargs):
         def decorator(f):
@@ -61,22 +69,20 @@ class HTTP_Server:
         return decorator
 
     def GetRouteMatch(self, path):
+        '''
+        Look up the view function by the path
+        :param path:
+        :return:
+        '''
         splits = path.split("?")
         path = splits[0]
-        params = {}
-        if len(splits) > 1:  # there are params like '?key=value&key2=value2
-            for pair in splits[1].split("&"):
-                k, v = pair.split("=")
-                params[k] = v
 
         for route_pattern, methods, view_function in self.routes:
             m = route_pattern.match(path)
             if m:
-                data = defaultdict(lambda: None)
-                data.update(m.groupdict())
-                if params:
-                    data["params"] = params
-                return data, methods, view_function
+                kwargs = defaultdict(lambda: None)
+                kwargs.update(m.groupdict()) # kwargs are from url matches like '/getuser/<name>'
+                return kwargs, methods, view_function
 
         return None
 
@@ -85,53 +91,81 @@ class HTTP_Server:
             print(*a, **k)
 
     def Serve(self, request):
+        '''
+
+        :param request:
+        :return: Response obj
+        '''
         self.print('87 req=', request)
         route_match = self.GetRouteMatch(request.path)
         self.print(71, route_match)
         if route_match:
             kwargs, methods, view_function = route_match
-            # unquote any arguments
-            for key, val in kwargs.items():
-                if val:
-                    try:
-                        kwargs[key] = unquote(val)
-                    except BaseException:
-                        pass
 
             self.print(73, kwargs, methods, view_function)
             if request.method in methods:
-                try:
-                    return self._FixViewFuncReturnType(
-                        view_function(request, **kwargs),
-                    )
-                except TypeError as e108:
-                    self.print("Exception 108:", e108)
+                # the view_function can accept several different arguments
+                # try them all until one succeeds or all fail
+                exception = None
+
+                tmp = kwargs.copy()
+                tmp.update({'request': request})
+                for combo in [
+                    tmp,
+                    {'request': request},
+                    kwargs.copy(),
+                    dict(),
+                ]:
+                    self.print('combo=', combo)
                     try:
                         return self._FixViewFuncReturnType(
-                            view_function(request),
+                            view_function(**combo),
                         )
-                    except TypeError as e113:
-                        self.print("Exception 113:", e113)
-                        try:
-                            return self._FixViewFuncReturnType(
-                                view_function(),
-                            )
-                        except TypeError as e93:
-                            self.print("Exception 93:", e93)
-                            return "Error 91: {}".format(e93), 404
+                    except Exception as e:
+                        self.print('Exception 122:', e, 'type=', type(e))
+                        if exception is None:
+                            exception = e
+                        elif 'unexpected keyword argument' in str(e):
+                            pass
+                        elif 'missing 1 required positional argument' in str(e):
+                            pass
+                        elif 'argument after ** must be a mapping' in str(e):
+                            pass
+                        else:
+                            exception = e
+                else:
+                    self.print('all combos failed. exception=', exception)
+                    raise exception if exception else Exception('Erro 141: {}'.format(e))
+            else:
+                return make_response('Error 145: method "{}" not supported for this endpoint. Supported methods={}'.format(
+                    request.method,
+                    methods,
+                ), status_code=403)
         else:
-            return 'Error 93: Route "{}"" has not been registered'.format(
-                request.path), 404
-            # raise ValueError('Route "{}"" has not been registered'.format(path))
+            return make_response('Error 93: Route "{}"" has not been registered'.format(
+                request.path), 404)
 
-    def _FixViewFuncReturnType(self, ret):
-        # the view function should return a tuple
+    @staticmethod
+    def _FixViewFuncReturnType(ret):
+        # the view function should return a str, tuple or Response object
         # if it returned a non-tuple, assume the user is implying a successfull
         # response ('ok', 200)
-        if not isinstance(ret, tuple):
-            return ret, 200
-        else:
+        if isinstance(ret, tuple):
+            response = make_response(ret[0])
+            response.status_code = ret[1]
+            return response
+
+        elif isinstance(ret, str):
+            return make_response(ret)
+
+        elif isinstance(ret, Response):
             return ret
+
+        else:
+            raise TypeError('Unrecognized return type "{}" from view function. ret={}'.format(
+                type(ret),
+                ret
+            ))
 
     @staticmethod
     def StatusCode(status):
@@ -140,8 +174,9 @@ class HTTP_Server:
             201: "Processed\n",
             401: "Unauthorized\n",
             404: "Unavailable\n",
+            500: 'Server Error\n',
         }
-        return codes[status]
+        return codes.get(status, 'Unkonwn Status Code {}'.format(status))
 
     # This receives the raw HTTP request
     def DataProcess(self, client, data):
@@ -149,44 +184,41 @@ class HTTP_Server:
         request = Request(raw=data)
         self.print('157 req=', request)
         try:
-            response, status_code = self.Serve(request)
-        except TypeError as e:
-            response, status_code = json.dumps({"Error": "Internal Server Error", 'Exception': str(e)}), 500
+            response = self.Serve(request)
+        except Exception as e:
+            self.print('163 e=', e)
+            response = jsonify({'Error 185': str(e)})
+            response.status_code = 500
 
-        self.DataReturn(client, response, status_code)
+        self.DataReturn(client, response)
 
-    def DataReturn(self, client, response, status_code):
+    def DataReturn(self, client, response):
+        '''
+
+        :param client:
+        :param response: Response object
+        :return:
+        '''
         # This is last in the sequence. It actually sends the raw response back to the client.
-
-        if isinstance(response, str):
-            response_body_raw = response
-
-            # Clearly state that connection will be closed after this response,
-            # and specify length of response body
-            response_headers = {
-                "Content-Type": "application/json;encoding=utf8",
-                "Content-Length": len(response_body_raw),
-                "Connection": "close",
-            }
-
-        elif isinstance(response, Response):
-            response_headers = response.headers.copy()
-            response_headers.update({
-                "Content-Length": len(response.body),
-                "Connection": "close",
-            })
-            response_body_raw = response.body
+        self.print('DataReturn(client=', client, ', response=', response)
+        # change the Response object into a raw HTTP response
+        response_headers = response.headers.copy()
+        response_headers.update({
+            "Content-Length": len(response.body),
+            "Connection": "close",
+        })
+        response_body_raw = response.body
 
         response_headers_raw = "".join(
             "{}: {}\n".format(k, v) for k, v in response_headers.items()
         )
 
-        # Reply as HTTP/1.1 server, saying "HTTP OK" (code 200).
+        # Reply as HTTP/1.1 server
         response_proto = "HTTP/1.1"
-        response_status = status_code
-        response_status_text = self.StatusCode(status_code)
+        response_status = response.status_code
+        response_status_text = self.StatusCode(response.status_code)
 
-        # sending all this stuff
+        # sending the raw http response over the raw TCP connection
         try:
             client.Send(
                 "{} {} {}".format(
@@ -279,6 +311,7 @@ class Request:
             s = self.path.split('?', 2)[-1]
             for pair in s.split('&'):
                 k, v = pair.split('=', 2)
+                v = unquote(v)
                 self.args[k] = v
 
         try:
@@ -329,9 +362,18 @@ class Response:
         # init
         self.headers['Content-Type'] = 'text/html'
 
+    def __str__(self):
+        return '<Response: status_code={}, headers={}, body={}>'.format(
+            self.status_code,
+            self.headers,
+            self.body
+        )
 
-def make_response(body):
-    return Response(body=body)
+
+def make_response(body='', status_code=200):
+    resp = Response(body=body)
+    resp.status_code = status_code
+    return resp
 
 
 patternTemplateVar = re.compile('\{\{(.+)\}\}')
@@ -359,8 +401,17 @@ def render_template(template_name, *args, **kwargs):
 
 
 def jsonify(obj):
-    resp = make_response(json.dumps(obj))
+    resp = make_response(json.dumps(obj, indent=2))
     resp.headers['content-type'] = 'application/json'
+    return resp
+
+
+def redirect(url):
+    # works like flask.redirect()
+    # see https://flask.palletsprojects.com/en/1.1.x/api/
+    resp = make_response()
+    resp.headers['Location'] = url
+    resp.status_code = 302
     return resp
 
 
