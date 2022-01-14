@@ -81,7 +81,7 @@ class HTTP_Server:
             m = route_pattern.match(path)
             if m:
                 kwargs = defaultdict(lambda: None)
-                kwargs.update(m.groupdict()) # kwargs are from url matches like '/getuser/<name>'
+                kwargs.update(m.groupdict())  # kwargs are from url matches like '/getuser/<name>'
                 return kwargs, methods, view_function
 
         return None
@@ -137,10 +137,11 @@ class HTTP_Server:
                     self.print('all combos failed. exception=', exception)
                     raise exception if exception else Exception('Erro 141: {}'.format(e))
             else:
-                return make_response('Error 145: method "{}" not supported for this endpoint. Supported methods={}'.format(
-                    request.method,
-                    methods,
-                ), status_code=403)
+                return make_response(
+                    'Error 145: method "{}" not supported for this endpoint. Supported methods={}'.format(
+                        request.method,
+                        methods,
+                    ), status_code=403)
         else:
             return make_response('Error 93: Route "{}"" has not been registered'.format(
                 request.path), 404)
@@ -172,6 +173,7 @@ class HTTP_Server:
         codes = {
             200: "Ok\n",
             201: "Processed\n",
+            302: "Redirect\n",
             401: "Unauthorized\n",
             404: "Unavailable\n",
             500: 'Server Error\n',
@@ -361,6 +363,8 @@ class Response:
 
         # init
         self.headers['Content-Type'] = 'text/html'
+        self.headers[
+            'Content-Language'] = 'en-US'  # sometimes chrome will prompt the user with "view this page in english?" if you dont include this header
 
     def __str__(self):
         return '<Response: status_code={}, headers={}, body={}>'.format(
@@ -393,7 +397,10 @@ def render_template(template_name, *args, **kwargs):
                 ret = ret.replace(match.group(0), str(value))
 
             else:
-                ret = ret.replace(match.group(0), str(value))
+                if isinstance(value, Response):
+                    value = value.body
+                else:
+                    ret = ret.replace(match.group(0), str(value))
 
     resp = make_response(ret)
     resp.headers['Content-Type'] = 'text/html'
