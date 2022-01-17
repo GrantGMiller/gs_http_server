@@ -1,3 +1,6 @@
+# get the latest version of this module here:
+# https://github.com/GrantGMiller/gs_http_server
+
 import re
 import json
 from collections import defaultdict
@@ -480,3 +483,42 @@ if __name__ == "__main__":
 
 
     print('open a web browser to this machine\'s IP on port', app.IPPort, )
+
+
+class HTTPS_Server(HTTP_Server):
+    def __init__(self,
+                 certificate,
+                 ca_certs,
+                 cert_reqs='CERT_NONE',
+                 ssl_version='TLSv2',
+                 proc=None, port=5505, debug=False,
+                 ):
+
+        self.proc = proc
+
+        self.debug = debug
+        self.defaultMethods = ["GET"]
+        self.routes = []  # list of tuples [(pattern, methods, callback), ...]
+        # Starts the Server Instance
+        self.serv = EthernetServerInterfaceEx(port, "TCP")
+        self.serv.SSLWrap(
+            certificate=certificate,
+            cert_reqs=cert_reqs,
+            ssl_version=ssl_version,
+            ca_certs=ca_certs,
+        )
+        self.print("self.serv=", self.serv)
+        res = self.serv.StartListen()
+        if res != "Listening":
+            print("self.serv.StartListen() res=", res)
+            # this is not likely to recover
+            raise ResourceWarning("Port unavailable")
+        self._InitServerEvents()
+        try:
+            self.print(type(self), 'running at', self.url)
+        except:
+            pass
+
+    @property
+    def url(self):
+        return 'https://{}:{}/'.format(self.IPAddress, self.IPPort)
