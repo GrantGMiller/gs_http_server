@@ -153,6 +153,17 @@ This is the 'template.html' for the example above.
     </body>
     </html>
 
+Static Files
+============
+Any files that are stored in the SFTP "/static" directory, or that are included in the RFile directory, can be served directly by directing the browser to '/static/<filename>'.
+
+For example, if the file is named 'image.jpg' then you can include the image in a web page by adding
+
+::
+
+    <img src='/static/image.jpg'/>
+
+
 Testing
 =======
 
