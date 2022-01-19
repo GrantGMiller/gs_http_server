@@ -3,12 +3,13 @@
 
 import re
 import json
+import uuid
 from collections import defaultdict
-
+import datetime
 import time
 from extronlib import event
 from urllib.parse import unquote
-from extronlib.system import File
+from extronlib.system import File, RFile
 from extronlib.interface import EthernetServerInterfaceEx
 
 
@@ -138,6 +139,7 @@ class HTTP_Server:
                             exception = e
                 else:
                     self.print('all combos failed. exception=', exception)
+                    self.print('request=', request)
                     raise exception if exception else Exception('Erro 141: {}'.format(e))
             else:
                 return make_response(
@@ -174,19 +176,20 @@ class HTTP_Server:
     @staticmethod
     def StatusCode(status):
         codes = {
-            200: "Ok\n",
-            201: "Processed\n",
-            302: "Redirect\n",
-            401: "Unauthorized\n",
-            404: "Unavailable\n",
-            500: 'Server Error\n',
+            200: "Ok",
+            201: "Processed",
+            302: "Redirect",
+            304: "NOT MODIFIED",
+            401: "Unauthorized",
+            404: "Unavailable",
+            500: 'Server Error',
         }
         return codes.get(status, 'Unkonwn Status Code {}'.format(status))
 
     # This receives the raw HTTP request
     def DataProcess(self, client, data):
         self.print('156', client, data)
-        request = Request(raw=data)
+        request = Request(raw=data, client=client)
         self.print('157 req=', request)
         try:
             response = self.Serve(request)
@@ -196,6 +199,7 @@ class HTTP_Server:
             response.status_code = 500
 
         self.DataReturn(client, response)
+        return response
 
     def DataReturn(self, client, response):
         '''
@@ -208,25 +212,20 @@ class HTTP_Server:
         self.print('DataReturn(client=', client, ', response=', response)
         # change the Response object into a raw HTTP response
         response_headers = response.headers.copy()
-        response_headers.update({
-            "Content-Length": len(response.body),
-            "Connection": "close",
-        })
         response_body_raw = response.body
 
         response_headers_raw = "".join(
-            "{}: {}\n".format(k, v) for k, v in response_headers.items()
+            "{}: {}\r\n".format(k.capitalize(), v) for k, v in response_headers.items()
         )
 
-        # Reply as HTTP/1.1 server
-        response_proto = "HTTP/1.1"
+        response_proto = response.proto
         response_status = response.status_code
         response_status_text = self.StatusCode(response.status_code)
 
         # sending the raw http response over the raw TCP connection
         try:
             client.Send(
-                "{} {} {}".format(
+                "{} {} {}\r\n".format(
                     response_proto,
                     response_status,
                     response_status_text))
@@ -235,7 +234,9 @@ class HTTP_Server:
             # to separate headers from body
             # (https://stackoverflow.com/questions/5757290/http-header-line-break-style#5757349)
             client.Send("\r\n")
-            client.Send(response_body_raw.encode())
+
+            data = response_body_raw.encode(encoding='iso-8859-1')
+            client.Send(data)
 
         except Exception as e2:
             self.print("Exception 188:", e2)
@@ -246,24 +247,121 @@ class HTTP_Server:
             self.print(
                 "HandleReceiveData({}, {}".format(
                     client, data.decode()))
-            self.DataProcess(client, data.decode())
+            response = self.DataProcess(client, data.decode())
             try:
-                client.Disconnect()
-                # This one time, I got this error for an unknown reason.
-                # '''
-                # Traceback (most recent call last):
-                #   File "/connection_handler.py", line 914, in new_rx
-                #     old_rx(client, data)
-                #   File "/gs_http_server.py", line 190, in HandleReceiveData
-                #     client.Disconnect()
-                # ValueError: list.remove(x): x not in list
-                # '''
+                if response.close_after_send:
+                    client.Disconnect()
             except Exception as e:
                 print("{} Exception 207:".format(type(self).__name__), e)
 
         @event(self.serv, ["Connected", "Disconnected"])
         def HandleClientConnect(client, state):
             self.print("Client {} ({}).".format(state, client.IPAddress))
+
+        @self.route('/static/<filename>')
+        def Static(filename, request):
+            '''
+            This will server static files that are located in the SFTP /static directory,
+                or in the RFile space.
+
+            :param filename:
+            :param request:
+            :return:
+            '''
+            print('Static(filename=', filename, ', request=', request)
+            filename = unquote(filename)
+            path = '/static/{}'.format(filename)
+            if File.Exists(path):
+                cls = File
+            elif RFile.Exists(filename):
+                cls = RFile
+                path = filename
+            else:
+                cls = None
+
+            if cls:
+                with cls(path, mode='rb') as file:
+                    resp = make_response(file.read().decode(encoding='iso-8859-1'))
+
+                    resp.headers['Content-Disposition'] = 'inline; filename={}'.format(filename)
+                    resp.headers['Cache-Control'] = 'no-cache'
+                    resp.headers['Date'] = datetime.datetime.utcnow().strftime(
+                        '%a, %d %b %Y %H:%M:%S GMT'
+                    )
+                    resp.headers['Last-Modified'] = resp.headers['Date']
+                    resp.headers['Etag'] = '"{}"'.format(str(uuid.uuid4()))
+                    typeMap = {
+                        'jpg': 'image',
+                        'png': 'image',
+                        'jpeg': 'image',
+                        'gif': 'image',
+                        'jfif': 'image',
+                        'ico': 'image',
+
+                        'flv': 'video',
+                        'mov': 'video',
+                        'mp4': 'video',
+                        'wmv': 'video',
+
+                        'mp3': 'audio',
+                        'wav': 'audio',
+                        'm4a': 'audio',
+                    }
+                    extension = filename.split('.')[-1]
+                    resp.headers['Content-Type'] = '{}/{}'.format(
+                        typeMap.get(extension.lower(), 'image'),
+                        extension,
+                    )
+
+                    resp.headers.pop('connection', None)
+                    resp.headers.pop('Content-Language', None)
+
+                    resp.status_code = 200
+                    resp.proto = 'HTTP/1.0'
+                    resp.close_after_send = True
+                    return resp
+            else:
+                return 'File "{}" not found in "/static" sftp directory or RFile space'.format(filename), 404
+
+
+class HTTPS_Server(HTTP_Server):
+    # WIP - still have to figure out how to make the IPCP trust my PC's certs
+    def __init__(self,
+                 certificate,
+                 ca_certs,
+                 cert_reqs='CERT_NONE',
+                 ssl_version='TLSv2',
+                 proc=None, port=5505, debug=False,
+                 ):
+
+        self.proc = proc
+
+        self.debug = debug
+        self.defaultMethods = ["GET"]
+        self.routes = []  # list of tuples [(pattern, methods, callback), ...]
+        # Starts the Server Instance
+        self.serv = EthernetServerInterfaceEx(port, "TCP")
+        self.serv.SSLWrap(
+            certificate=certificate,
+            cert_reqs=cert_reqs,
+            ssl_version=ssl_version,
+            ca_certs=ca_certs,
+        )
+        self.print("self.serv=", self.serv)
+        res = self.serv.StartListen()
+        if res != "Listening":
+            print("self.serv.StartListen() res=", res)
+            # this is not likely to recover
+            raise ResourceWarning("Port unavailable")
+        self._InitServerEvents()
+        try:
+            self.print(type(self), 'running at', self.url)
+        except:
+            pass
+
+    @property
+    def url(self):
+        return 'https://{}:{}/'.format(self.IPAddress, self.IPPort)
 
 
 def NormalizeLineEndings(s):
@@ -290,11 +388,16 @@ class CaseInsensitiveDict(dict):
     def get(self, k, *args, **kwargs):
         return super().get(k.lower(), *args, **kwargs)
 
+    def pop(self, k, *args, **kwargs):
+        return super().pop(k.lower(), *args, **kwargs)
+
 
 class Request:
     # should follow https://flask.palletsprojects.com/en/1.1.x/api/#incoming-request-data
     def __init__(self, raw, **kwargs):
         self.raw = NormalizeLineEndings(raw)
+        self.client = kwargs.pop('client', None)
+
         self.kwargs = kwargs
 
         # parse
@@ -346,11 +449,12 @@ class Request:
                     self.form[k] += ';{}'.format(v)
 
     def __str__(self):
-        return '<Request: method={}, path={}, form={}, args={}>'.format(
+        return '<Request: method={}, path={}, form={}, args={}, client={}>'.format(
             self.method,
             self.path,
             self.form,
             self.args,
+            self.client,
         )
 
     def get_json(self):
@@ -363,11 +467,16 @@ class Response:
         self.body = body
         self.headers = CaseInsensitiveDict()
         self.status_code = 200
+        self.proto = 'HTTP/1.1'
+        self.close_after_send = True
 
         # init
         self.headers['Content-Type'] = 'text/html'
+        self.headers['connection'] = 'close'
         self.headers[
             'Content-Language'] = 'en-US'  # sometimes chrome will prompt the user with "view this page in english?" if you dont include this header
+        self.headers['content-length'] = len(body)
+        self.headers['Server'] = 'GS_HTTP_SERVER'
 
     def __str__(self):
         return '<Response: status_code={}, headers={}, body={}>'.format(
@@ -381,6 +490,11 @@ def make_response(body='', status_code=200):
     resp = Response(body=body)
     resp.status_code = status_code
     return resp
+
+
+def send_file(path):
+    with File(path, mode='rb') as file:
+        return file.read()
 
 
 patternTemplateVar = re.compile('\{\{(.+)\}\}')
@@ -434,7 +548,6 @@ except Exception as e:
     evalAvailable = False
 
 if __name__ == "__main__":
-    import datetime
     import random
 
     app = HTTP_Server(
@@ -483,42 +596,3 @@ if __name__ == "__main__":
 
 
     print('open a web browser to this machine\'s IP on port', app.IPPort, )
-
-
-class HTTPS_Server(HTTP_Server):
-    def __init__(self,
-                 certificate,
-                 ca_certs,
-                 cert_reqs='CERT_NONE',
-                 ssl_version='TLSv2',
-                 proc=None, port=5505, debug=False,
-                 ):
-
-        self.proc = proc
-
-        self.debug = debug
-        self.defaultMethods = ["GET"]
-        self.routes = []  # list of tuples [(pattern, methods, callback), ...]
-        # Starts the Server Instance
-        self.serv = EthernetServerInterfaceEx(port, "TCP")
-        self.serv.SSLWrap(
-            certificate=certificate,
-            cert_reqs=cert_reqs,
-            ssl_version=ssl_version,
-            ca_certs=ca_certs,
-        )
-        self.print("self.serv=", self.serv)
-        res = self.serv.StartListen()
-        if res != "Listening":
-            print("self.serv.StartListen() res=", res)
-            # this is not likely to recover
-            raise ResourceWarning("Port unavailable")
-        self._InitServerEvents()
-        try:
-            self.print(type(self), 'running at', self.url)
-        except:
-            pass
-
-    @property
-    def url(self):
-        return 'https://{}:{}/'.format(self.IPAddress, self.IPPort)
