@@ -8,9 +8,11 @@ from collections import defaultdict
 import datetime
 import time
 from extronlib import event
-from urllib.parse import unquote
+from urllib.parse import unquote, quote
 from extronlib.system import File, RFile
 from extronlib.interface import EthernetServerInterfaceEx
+
+SESSION_ID = 'session_id'
 
 
 class HTTP_Server:
@@ -370,9 +372,6 @@ def NormalizeLineEndings(s):
     return '\n'.join(s.splitlines())
 
 
-import collections
-
-
 class CaseInsensitiveDict(dict):
 
     def __getitem__(self, k):
@@ -448,12 +447,28 @@ class Request:
                 else:
                     self.form[k] += ';{}'.format(v)
 
+        # parse cookies
+        cookies = {}
+        for key, value in self.headers.items():
+            if key == 'cookie':
+                for pair in value.split(';'):
+                    pair = pair.strip()
+                    k, v = pair.split('=')
+                    v = unquote(v)
+                    cookies[k] = v
+
+        # if SESSION_ID not in cookies:
+        #     cookies[SESSION_ID] = str(uuid.uuid4())
+
+        self.cookies = cookies
+
     def __str__(self):
-        return '<Request: method={}, path={}, form={}, args={}, client={}>'.format(
+        return '<Request: method={}, path={}, form={}, args={}, cookies={}, client={}>'.format(
             self.method,
             self.path,
             self.form,
             self.args,
+            self.cookies,
             self.client,
         )
 
@@ -477,6 +492,16 @@ class Response:
             'Content-Language'] = 'en-US'  # sometimes chrome will prompt the user with "view this page in english?" if you dont include this header
         self.headers['content-length'] = len(body)
         self.headers['Server'] = 'GS_HTTP_SERVER'
+
+    def set_cookie(self, key, value):
+        # value = quote(value)
+        headerValue = '{}={}'.format(key, value)
+        currentCookieHeaderValue = self.headers.get('Set-Cookie', None)
+        if currentCookieHeaderValue:
+            currentCookieHeaderValue += '; {}'.format(headerValue)
+        else:
+            currentCookieHeaderValue = headerValue
+        self.headers['Set-Cookie'] = headerValue
 
     def __str__(self):
         return '<Response: status_code={}, headers={}, body={}>'.format(
@@ -539,12 +564,21 @@ def redirect(url):
     return resp
 
 
+flashes = {
+    # str(session_uuid): list((args, kwargs)),
+}
+
+
+def flash(*args, **kwargs):
+    pass
+
+
 try:
     # eval only works on XI processors
     eval('print("eval is available for templates")')
     evalAvailable = True
 except Exception as e:
-    print('eval() is not available', e)
+    print('eval() is not available', e, '. The eval() function is only available on Pro Q/XI Processors')
     evalAvailable = False
 
 if __name__ == "__main__":
