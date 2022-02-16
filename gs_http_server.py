@@ -314,7 +314,7 @@ class HTTP_Server:
                     }
                     extension = filename.split('.')[-1]
                     resp.headers['Content-Type'] = '{}/{}'.format(
-                        typeMap.get(extension.lower(), 'text'),
+                        typeMap[extension.lower()],
                         extension,
                     )
 
