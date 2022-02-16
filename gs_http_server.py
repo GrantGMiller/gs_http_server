@@ -315,7 +315,7 @@ class HTTP_Server:
                     extension = filename.split('.')[-1]
                     resp.headers['Content-Type'] = '{}/{}'.format(
                         typeMap[extension.lower()],
-                        extension,
+                        extension if not extension.lower() == 'svg' else 'svg+xml',# per https://stackoverflow.com/questions/11918977/right-mime-type-for-svg-images-with-fonts-embedded
                     )
 
                     resp.headers.pop('connection', None)
