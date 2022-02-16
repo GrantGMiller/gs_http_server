@@ -299,6 +299,7 @@ class HTTP_Server:
                         'gif': 'image',
                         'jfif': 'image',
                         'ico': 'image',
+                        'svg': 'image',
 
                         'flv': 'video',
                         'mov': 'video',
@@ -308,10 +309,12 @@ class HTTP_Server:
                         'mp3': 'audio',
                         'wav': 'audio',
                         'm4a': 'audio',
+
+                        'css': 'text',
                     }
                     extension = filename.split('.')[-1]
                     resp.headers['Content-Type'] = '{}/{}'.format(
-                        typeMap.get(extension.lower(), 'image'),
+                        typeMap.get(extension.lower(), 'text'),
                         extension,
                     )
 
